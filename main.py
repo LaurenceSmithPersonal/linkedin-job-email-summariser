@@ -18,6 +18,11 @@ SCOPES = [
 ]
 
 
+LINKEDIN_EMAIL_ADDRESSES = [
+                            "jobs-noreply@linkedin.com", 
+                            "jobalerts-noreply@linkedin.com"
+                            ]
+
 def get_gmail_service():
     creds = None
     token_path = BASE_DIR / "token.json"

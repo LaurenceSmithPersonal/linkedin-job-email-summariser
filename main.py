@@ -3,7 +3,7 @@ import hashlib
 import json
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -92,63 +92,187 @@ def get_linkedin_messages(service, limit: int = 10, cutoff_date: date | datetime
     return messages[:limit]
 
 
-def parse_email_content(content: str) -> dict[str, str]:
+def extract_email_lines(content: str) -> list[str]:
     normalized_content = content or ""
-    lines = [line.strip() for line in normalized_content.splitlines() if line.strip()]
+    return [line.strip() for line in normalized_content.splitlines() if line.strip()]
 
-    subject_line = next((line.split(":", 1)[1].strip() for line in lines if line.lower().startswith("subject:")), "")
-    source_text = "\n".join(lines)
 
-    title = ""
-    company = ""
+def parse_email_content(content: str) -> list[dict[str, str]]:
+    lines = extract_email_lines(content)
 
-    for line in lines:
-        match = re.match(r"(?i)\b(?:role|title|position|job)\s*[:\-]\s*(.+)", line)
-        if match:
-            title = match.group(1).strip(" .:-")
+    if not lines:
+        return []
+
+    def is_generic_text(value: str) -> bool:
+        lowered = value.lower()
+        generic_phrases = {
+            "new jobs match your preferences.",
+            "expand your search",
+            "recommendations based on your activity.",
+            "this email was intended for",
+            "learn why we included this",
+            "you are receiving job alert emails.",
+            "manage your job alerts",
+            "unsubscribe:",
+            "view all jobs:",
+            "this company is actively hiring",
+            "apply with resume & profile",
+            "see all jobs on linkedin",
+            "your job alert for",
+        }
+        return lowered in generic_phrases or any(
+            phrase in lowered for phrase in ("learn why", "manage your job alerts", "unsubscribe", "view all jobs", "this email was intended")
+        )
+
+    def parse_simple_content(source_lines: list[str]) -> list[dict[str, str]]:
+        subject_line = next((line.split(":", 1)[1].strip() for line in source_lines if line.lower().startswith("subject:")), "")
+        source_text = "\n".join(source_lines)
+
+        title = ""
+        company = ""
+        location = ""
+        salary = ""
+        url = ""
+
+        for line in source_lines:
+            match = re.match(r"(?i)\b(?:role|title|position|job)\s*[:\-]\s*(.+)", line)
+            if match:
+                title = match.group(1).strip(" .:-")
+                break
+
+        if not title:
+            match = re.search(r"(?i)\b(?:subject|headline)\s*[:\-]\s*(.+)", source_text)
+            if match:
+                title = match.group(1).strip(" .:-")
+
+        if not title and subject_line:
+            title = subject_line.strip(" .:-")
+
+        if not company and subject_line:
+            if " at " in subject_line:
+                parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" at ", 1)]
+                if not title:
+                    title = parsed_title
+                company = parsed_company
+            elif " - " in subject_line:
+                parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" - ", 1)]
+                if not title:
+                    title = parsed_title
+                company = parsed_company
+
+        for line in source_lines:
+            location_match = re.match(r"(?i)location\s*[:\-]\s*(.+)", line)
+            if location_match:
+                location = location_match.group(1).strip()
+                break
+
+        for line in source_lines:
+            salary_match = re.match(r"(?i)(?:salary|compensation|pay)\s*[:\-]\s*(.+)", line)
+            if salary_match:
+                salary = salary_match.group(1).strip()
+                break
+
+        url_match = re.search(r"https?://[^\s)\]>]+", source_text)
+        if url_match:
+            url = url_match.group(0)
+
+        if title or company or location or url:
+            return [
+                {
+                    "title": title,
+                    "company": company,
+                    "location": location,
+                    "salary": salary,
+                    "url": url,
+                    "extra information": "",
+                }
+            ]
+
+        return []
+
+    start_index = None
+    end_index = None
+
+    for index, line in enumerate(lines):
+        if line.lower() == "new jobs match your preferences.":
+            start_index = index + 1
+        elif line.lower().startswith("see all jobs on linkedin"):
+            end_index = index
             break
 
-    if not title:
-        match = re.search(r"(?i)\b(?:subject|headline)\s*[:\-]\s*(.+)", source_text)
-        if match:
-            title = match.group(1).strip(" .:-")
+    if start_index is None:
+        start_index = 0
+    if end_index is None:
+        end_index = len(lines)
 
-    if not title and subject_line:
-        title = subject_line.strip(" .:-")
+    relevant_lines = [line.strip() for line in lines[start_index:end_index] if line.strip()]
 
-    if not company and subject_line:
-        if " at " in subject_line:
-            parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" at ", 1)]
-            if not title:
-                title = parsed_title
-            company = parsed_company
-        elif " - " in subject_line:
-            parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" - ", 1)]
-            if not title:
-                title = parsed_title
-            company = parsed_company
+    if not any(line.startswith("-----") for line in relevant_lines):
+        return parse_simple_content(relevant_lines or lines)
 
-    location = ""
-    salary = ""
-    url = ""
+    job_blocks: list[list[str]] = []
+    current_block: list[str] = []
 
-    for line in lines:
-        if not location and re.match(r"(?i)location\s*[:\-]", line):
-            location = re.split(r"(?i)location\s*[:\-]", line, maxsplit=1)[1].strip()
-        if not salary and re.match(r"(?i)(?:salary|compensation|pay)\s*[:\-]", line):
-            salary = re.split(r"(?i)(?:salary|compensation|pay)\s*[:\-]", line, maxsplit=1)[1].strip()
+    for line in relevant_lines:
+        if line.startswith("-----"):
+            if current_block:
+                job_blocks.append(current_block)
+                current_block = []
+            continue
+        current_block.append(line)
 
-    url_match = re.search(r"https?://[^\s)\]>]+", source_text)
-    if url_match:
-        url = url_match.group(0)
+    if current_block:
+        job_blocks.append(current_block)
 
-    return {
-        "title": title,
-        "company": company,
-        "location": location,
-        "salary": salary,
-        "url": url,
-    }
+    parsed_jobs: list[dict[str, str]] = []
+
+    for block in job_blocks:
+        if not block:
+            continue
+
+        normalized_block = [line for line in block if line]
+        if len(normalized_block) < 3:
+            continue
+
+        title = normalized_block[0]
+        company = normalized_block[1] if len(normalized_block) > 1 else ""
+        location = normalized_block[2] if len(normalized_block) > 2 else ""
+
+        if is_generic_text(title) or is_generic_text(company) or is_generic_text(location):
+            continue
+
+        url = ""
+        extra_information_parts: list[str] = []
+
+        for line in normalized_block[3:]:
+            url_match = re.search(r"https?://[^\s)\]>]+", line)
+            if url_match:
+                url = url_match.group(0)
+            else:
+                extra_information_parts.append(line)
+
+        if not url and normalized_block:
+            last_line = normalized_block[-1]
+            last_url_match = re.search(r"https?://[^\s)\]>]+", last_line)
+            if last_url_match:
+                url = last_url_match.group(0)
+                extra_information_parts = [line for line in normalized_block[3:-1] if line]
+
+        parsed_jobs.append(
+            {
+                "title": title,
+                "company": company,
+                "location": location,
+                "salary": "",
+                "url": url,
+                "extra information": "\n".join(extra_information_parts).strip(),
+            }
+        )
+
+    if parsed_jobs:
+        return parsed_jobs
+
+    return parse_simple_content(relevant_lines or lines)
 
 
 def make_job_id(job: dict[str, str]) -> str:
@@ -196,6 +320,41 @@ def persist_jobs(path: str | os.PathLike[str], jobs: list[dict[str, Any]]) -> No
         handle.write("\n")
 
 
+def export_recent_email_lines(
+    output_path: str | os.PathLike[str] = BASE_DIR / "recent_linkedin_email_lines.json",
+    limit: int = 5,
+    days: int = 3,
+) -> list[dict[str, Any]]:
+    cutoff_date = date.today() - timedelta(days=days)
+    service = get_gmail_service()
+    messages = get_linkedin_messages(service, limit=max(limit * 4, 20), cutoff_date=cutoff_date)
+
+    samples: list[dict[str, Any]] = []
+    for message in messages[:limit]:
+        headers = {header["name"].lower(): header["value"] for header in message.get("payload", {}).get("headers", [])}
+        subject = headers.get("subject", "")
+        body = extract_message_text(message.get("payload", {}))
+        full_content = f"Subject: {subject}\n{body}"
+
+        if "linkedin" not in full_content.lower():
+            continue
+
+        samples.append(
+            {
+                "message_id": message.get("id"),
+                "subject": subject,
+                "email_datetime": datetime.fromtimestamp(int(message.get("internalDate", "0")) / 1000, tz=timezone.utc).isoformat(),
+                "lines": extract_email_lines(full_content),
+            }
+        )
+
+    with Path(output_path).open("w", encoding="utf-8") as handle:
+        json.dump(samples, handle, indent=2)
+        handle.write("\n")
+
+    return samples
+
+
 def run_workflow(
     output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json",
     limit: int = 10,
@@ -214,12 +373,13 @@ def run_workflow(
         if "linkedin" not in full_content.lower():
             continue
 
-        parsed = parse_email_content(full_content)
-        if parsed.get("title") or parsed.get("url"):
-            parsed.setdefault("id", make_job_id(parsed))
-            parsed.setdefault("source_message_id", message.get("id"))
-            parsed.setdefault("email_datetime", datetime.fromtimestamp(int(message.get("internalDate", "0")) / 1000, tz=timezone.utc).isoformat())
-            parsed_jobs.append(parsed)
+        parsed_jobs_for_message = parse_email_content(full_content)
+        for parsed in parsed_jobs_for_message:
+            if parsed.get("title") or parsed.get("url"):
+                parsed.setdefault("id", make_job_id(parsed))
+                parsed.setdefault("source_message_id", message.get("id"))
+                parsed.setdefault("email_datetime", datetime.fromtimestamp(int(message.get("internalDate", "0")) / 1000, tz=timezone.utc).isoformat())
+                parsed_jobs.append(parsed)
 
     existing_jobs = load_jobs(output_path)
     merged_jobs = merge_jobs(existing_jobs, parsed_jobs)

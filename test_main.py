@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import date, datetime, timezone
 
 import main
 
@@ -49,6 +50,12 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
                 saved = json.load(handle)
 
             self.assertEqual(saved, jobs)
+
+    def test_is_message_recent_enough_uses_cutoff_date(self):
+        message = {"internalDate": "1718832000000"}
+
+        self.assertTrue(main.is_message_recent_enough(message, date(2024, 6, 1)))
+        self.assertFalse(main.is_message_recent_enough(message, date(2024, 7, 1)))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
         "/^\\./\\.venv/bin/python -m unittest -q$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "./.venv/bin/python": true
     }
 }

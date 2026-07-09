@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -61,17 +62,34 @@ def extract_message_text(payload: dict[str, Any]) -> str:
     return "\n".join(text_parts).strip()
 
 
-def get_linkedin_messages(service, limit: int = 10) -> list[dict[str, Any]]:
-    query = "from:(linkedin.com) OR subject:(LinkedIn) OR subject:(job) OR linkedin"
+def is_message_recent_enough(message: dict[str, Any], cutoff_date: date | datetime | None = None) -> bool:
+    if cutoff_date is None:
+        return True
+
+    cutoff = cutoff_date.date() if isinstance(cutoff_date, datetime) else cutoff_date
+
+    internal_date = message.get("internalDate")
+    if not internal_date:
+        return False
+
+    message_timestamp = datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc).date()
+    return message_timestamp >= cutoff
+
+
+def get_linkedin_messages(service, limit: int = 10, cutoff_date: date | datetime | None = None) -> list[dict[str, Any]]:
+    sender_filter = " OR ".join(f"from:({address})" for address in LINKEDIN_EMAIL_ADDRESSES)
+    query = f"({sender_filter})"
     response = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
     message_refs = response.get("messages", [])
     messages: list[dict[str, Any]] = []
 
     for message_ref in message_refs:
         message = service.users().messages().get(userId="me", id=message_ref["id"], format="full").execute()
-        messages.append(message)
+        if is_message_recent_enough(message, cutoff_date):
+            messages.append(message)
 
-    return messages
+    messages.sort(key=lambda item: int(item.get("internalDate", "0")), reverse=True)
+    return messages[:limit]
 
 
 def parse_email_content(content: str) -> dict[str, str]:
@@ -178,9 +196,13 @@ def persist_jobs(path: str | os.PathLike[str], jobs: list[dict[str, Any]]) -> No
         handle.write("\n")
 
 
-def run_workflow(output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json", limit: int = 10) -> list[dict[str, Any]]:
+def run_workflow(
+    output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json",
+    limit: int = 10,
+    cutoff_date: date | datetime | None = None,
+) -> list[dict[str, Any]]:
     service = get_gmail_service()
-    messages = get_linkedin_messages(service, limit=limit)
+    messages = get_linkedin_messages(service, limit=limit, cutoff_date=cutoff_date)
     parsed_jobs: list[dict[str, Any]] = []
 
     for message in messages:
@@ -196,6 +218,7 @@ def run_workflow(output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json", l
         if parsed.get("title") or parsed.get("url"):
             parsed.setdefault("id", make_job_id(parsed))
             parsed.setdefault("source_message_id", message.get("id"))
+            parsed.setdefault("email_datetime", datetime.fromtimestamp(int(message.get("internalDate", "0")) / 1000, tz=timezone.utc).isoformat())
             parsed_jobs.append(parsed)
 
     existing_jobs = load_jobs(output_path)
@@ -205,7 +228,8 @@ def run_workflow(output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json", l
 
 
 def main() -> None:
-    jobs = run_workflow()
+    cutoff_date = date.today()
+    jobs = run_workflow(cutoff_date=cutoff_date)
     print(f"Processed {len(jobs)} jobs and saved them to {BASE_DIR / 'jobs.json'}")
 
 

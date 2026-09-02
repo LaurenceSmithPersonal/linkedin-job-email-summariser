@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import main
+from google.auth.exceptions import RefreshError
 
 
 class LinkedInEmailWorkflowTests(unittest.TestCase):
@@ -106,6 +108,38 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertTrue(main.is_message_in_date_range(message, date_from=date(2024, 6, 1), date_to=date(2024, 6, 30)))
         self.assertFalse(main.is_message_in_date_range(message, date_from=date(2024, 6, 30), date_to=date(2024, 6, 30)))
         self.assertFalse(main.is_message_in_date_range(message, date_from=date(2024, 6, 1), date_to=date(2024, 6, 2)))
+
+    def test_get_gmail_service_reauthenticates_after_refresh_error(self):
+        """Ensure stale refresh tokens trigger a fresh OAuth flow automatically."""
+        class FakeCredentials:
+            expired = True
+            valid = False
+            refresh_token = "stale_refresh_token"
+
+            def refresh(self, request):
+                raise RefreshError("invalid_grant")
+
+            def to_json(self):
+                return '{"token": "fresh"}'
+
+        fake_creds = FakeCredentials()
+
+        temp_dir = Path(tempfile.mkdtemp())
+        token_path = temp_dir / "token.json"
+        token_path.write_text("{\"stale\": true}", encoding="utf-8")
+
+        with patch.object(main, "BASE_DIR", temp_dir), \
+             patch.object(main, "SCOPES", ["scope"]), \
+             patch.object(main.Credentials, "from_authorized_user_file", return_value=fake_creds), \
+             patch.object(main.InstalledAppFlow, "from_client_secrets_file") as flow_factory, \
+             patch.object(main, "build", return_value="service") as build_mock:
+            flow = type("Flow", (), {"run_local_server": lambda self, port=0: fake_creds})()
+            flow_factory.return_value = flow
+            service = main.get_gmail_service()
+
+        self.assertEqual(service, "service")
+        build_mock.assert_called_once_with("gmail", "v1", credentials=fake_creds)
+        self.assertTrue(token_path.exists())
 
 
 if __name__ == "__main__":

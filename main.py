@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -41,9 +42,16 @@ def get_gmail_service():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            # Refresh expired credentials when a valid refresh token exists.
-            creds.refresh(Request())
-        else:
+            # Google can revoke or invalidate a saved refresh token. When that
+            # happens, discard the stale token and start a fresh OAuth flow so the
+            # user is prompted automatically for re-authentication.
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                creds = None
+                if token_path.exists():
+                    token_path.unlink()
+        if not creds or not creds.valid:
             # Otherwise, complete the OAuth flow and persist the resulting token
             # so future runs do not require re-authentication.
             flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)

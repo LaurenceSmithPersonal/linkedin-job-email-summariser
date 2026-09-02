@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Review Desk</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="Job Review Desk home">
+        <span class="brand-mark" aria-hidden="true">JR</span>
+        <span>Job Review Desk</span>
+      </a>
+      <button class="button button-primary" id="update-button" type="button">
+        <span aria-hidden="true">&#8635;</span> Update jobs
+      </button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="toolbar" aria-label="Job list controls">
+      <div class="stats" aria-live="polite">
+        <strong id="visible-count">0 jobs</strong>
+        <span id="review-count">0 awaiting review</span>
+      </div>
+      <label class="filter-label" for="job-filter">Show</label>
+      <select id="job-filter">
+        <option value="all">All jobs</option>
+        <option value="unreviewed">Not reviewed</option>
+      </select>
+    </section>
+
+    <p class="status-message" id="status-message" role="status" aria-live="polite"></p>
+    <section id="job-list" class="job-list" aria-label="Available jobs" aria-busy="true">
+      <div class="loading-state">Loading your jobs...</div>
+    </section>
+  </main>
+
+</body>
+</html>

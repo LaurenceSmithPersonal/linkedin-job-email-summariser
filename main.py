@@ -356,6 +356,7 @@ def merge_jobs(existing_jobs: list[dict[str, Any]], incoming_jobs: list[dict[str
     for job in incoming_jobs:
         job_copy = dict(job)
         job_copy.setdefault("id", make_job_id(job_copy))
+        job_copy.setdefault("reviewed", "no")
         if job_copy["id"] not in merged:
             merged[job_copy["id"]] = job_copy
 

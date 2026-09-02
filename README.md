@@ -11,6 +11,18 @@ Workflow to read LinkedIn job emails, extract useful fields, and de-duplicate th
 uv run python main.py
 ```
 
+## Web front end
+
+Start the local job review interface with:
+
+```bash
+uv run python web_server.py
+```
+
+Then open <http://127.0.0.1:8000>. The interface reads jobs from `jobs.json`,
+persists reviewed/not-reviewed changes, and can run the Gmail update workflow
+with the **Update jobs** button. Stop the server with `Ctrl+C`.
+
 To target a specific date range, call the workflow directly with inclusive bounds:
 
 ```python

@@ -1,7 +1,7 @@
 [project]
 name = "linkedin-job-email-summariser"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agentic workflow to read LinkedIn job emails and persist normalized job results."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -9,4 +9,11 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "google-auth-oauthlib>=1.0.0",
     "google-auth-httplib2>=0.1.0",
+    "pytest>=9.1.1",
 ]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

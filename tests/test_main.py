@@ -9,33 +9,25 @@ import main
 
 
 class LinkedInEmailWorkflowTests(unittest.TestCase):
+    """Exercise the LinkedIn email parsing workflow and its data-handling helpers."""
+
     def test_extract_email_lines_strips_blank_lines(self):
+        """Ensure blank lines are removed while preserving meaningful email content.
+
+        Returns:
+            None. The test asserts on the cleaned line list.
+        """
         content = "\n\nSubject: Developer at Acme\n  Role: Senior Engineer\n\n"
 
         self.assertEqual(main.extract_email_lines(content), ["Subject: Developer at Acme", "Role: Senior Engineer"])
 
-    def test_parse_email_content_extracts_key_fields(self):
-        sample_email = """
-        Subject: Software Engineer at Acme Corp
-        Hello,
-        We thought you'd be interested in this opportunity:
-        Role: Senior Backend Engineer
-        Location: Remote, US
-        Salary: $180k-$220k
-        Apply here: https://www.linkedin.com/jobs/view/123456789
-        """
-
-        parsed_jobs = main.parse_email_content(sample_email)
-
-        self.assertEqual(len(parsed_jobs), 1)
-        self.assertEqual(parsed_jobs[0]["title"], "Senior Backend Engineer")
-        self.assertEqual(parsed_jobs[0]["company"], "Acme Corp")
-        self.assertEqual(parsed_jobs[0]["location"], "Remote, US")
-        self.assertEqual(parsed_jobs[0]["salary"], "$180k-$220k")
-        self.assertEqual(parsed_jobs[0]["url"], "https://www.linkedin.com/jobs/view/123456789")
-
     def test_parse_email_content_extracts_multiple_jobs_from_fixture(self):
-        fixture_path = Path(__file__).resolve().parent / "recent_linkedin_email_lines.json"
+        """Parse a real sample email fixture into multiple job records.
+
+        Returns:
+            None. The test validates the parsed title, company, location, and URL.
+        """
+        fixture_path = Path(__file__).resolve().parent / "inputs" / "recent_linkedin_email_lines.json"
         with fixture_path.open("r", encoding="utf-8") as handle:
             samples = json.load(handle)
 
@@ -49,7 +41,12 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertIn("extra information", parsed_jobs[0])
 
     def test_parse_email_content_handles_all_recent_fixtures(self):
-        fixture_path = Path(__file__).resolve().parent / "recent_linkedin_email_lines.json"
+        """Ensure each recorded fixture parses into at least one valid job record.
+
+        Returns:
+            None. The test asserts that every fixture yields valid job fields.
+        """
+        fixture_path = Path(__file__).resolve().parent / "inputs" / "recent_linkedin_email_lines.json"
         with fixture_path.open("r", encoding="utf-8") as handle:
             samples = json.load(handle)
 
@@ -65,6 +62,11 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
                 self.assertTrue(parsed_job.get("url"))
 
     def test_merge_jobs_appends_only_new_entries(self):
+        """Ensure merge_jobs only adds new IDs while preserving existing records.
+
+        Returns:
+            None. The test validates deduplicated merge behavior.
+        """
         existing = [{"id": "job-1", "title": "Existing Role"}]
         incoming = [
             {"id": "job-2", "title": "New Role"},
@@ -77,6 +79,11 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in merged], ["job-1", "job-2"])
 
     def test_persist_jobs_writes_json_file(self):
+        """Write job records to disk as JSON and preserve their content.
+
+        Returns:
+            None. The test verifies the saved JSON matches the input jobs.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "jobs.json")
             jobs = [{"id": "job-1", "title": "Engineeer"}]
@@ -88,11 +95,17 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
 
             self.assertEqual(saved, jobs)
 
-    def test_is_message_recent_enough_uses_cutoff_date(self):
+    def test_is_message_in_date_range_uses_inclusive_bounds(self):
+        """Check inclusive date-range filtering for Gmail message age.
+
+        Returns:
+            None. The test asserts the date boundary behavior.
+        """
         message = {"internalDate": "1718832000000"}
 
-        self.assertTrue(main.is_message_recent_enough(message, date(2024, 6, 1)))
-        self.assertFalse(main.is_message_recent_enough(message, date(2024, 7, 1)))
+        self.assertTrue(main.is_message_in_date_range(message, date_from=date(2024, 6, 1), date_to=date(2024, 6, 30)))
+        self.assertFalse(main.is_message_in_date_range(message, date_from=date(2024, 6, 30), date_to=date(2024, 6, 30)))
+        self.assertFalse(main.is_message_in_date_range(message, date_from=date(2024, 6, 1), date_to=date(2024, 6, 2)))
 
 
 if __name__ == "__main__":

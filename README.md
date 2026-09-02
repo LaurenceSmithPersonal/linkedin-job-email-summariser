@@ -1,5 +1,5 @@
 # linkedin-job-email-summariser
-Agentic workflow to read LinkedIn job emails, extract useful fields, and de-duplicate them into a local JSON file.
+Workflow to read LinkedIn job emails, extract useful fields, and de-duplicate them into a local JSON file.
 
 ## Setup
 1. Install the project dependencies with `uv sync`.
@@ -9,6 +9,20 @@ Agentic workflow to read LinkedIn job emails, extract useful fields, and de-dupl
 ## Run
 ```bash
 uv run python main.py
+```
+
+To target a specific date range, call the workflow directly with inclusive bounds:
+
+```python
+from datetime import date
+import main
+
+jobs = main.run_workflow(
+    output_path="jobs.json",
+    limit=25,
+    date_from=date(2026, 8, 1),
+    date_to=date(2026, 8, 31),
+)
 ```
 
 The script will:

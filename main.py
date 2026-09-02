@@ -20,11 +20,18 @@ SCOPES = [
 
 
 LINKEDIN_EMAIL_ADDRESSES = [
-                            "jobs-noreply@linkedin.com", 
-                            "jobalerts-noreply@linkedin.com"
-                            ]
+    "jobs-noreply@linkedin.com",
+    "jobalerts-noreply@linkedin.com",
+]
+
 
 def get_gmail_service():
+    """Create an authenticated Gmail API client for the current user.
+
+    Returns:
+        googleapiclient.discovery.Resource: A configured Gmail API resource that can
+        be used to list and fetch messages in the authenticated account.
+    """
     creds = None
     token_path = BASE_DIR / "token.json"
     credentials_path = BASE_DIR / "credentials.json"
@@ -34,8 +41,11 @@ def get_gmail_service():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            # Refresh expired credentials when a valid refresh token exists.
             creds.refresh(Request())
         else:
+            # Otherwise, complete the OAuth flow and persist the resulting token
+            # so future runs do not require re-authentication.
             flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
             creds = flow.run_local_server(port=0)
 
@@ -46,6 +56,15 @@ def get_gmail_service():
 
 
 def extract_message_text(payload: dict[str, Any]) -> str:
+    """Extract the readable plain text content from a Gmail message payload.
+
+    Args:
+        payload: A Gmail message payload dictionary, possibly containing nested
+            multipart message parts.
+
+    Returns:
+        A string containing the text content decoded from the message body.
+    """
     text_parts: list[str] = []
 
     if payload.get("mimeType", "").startswith("text/"):
@@ -62,21 +81,61 @@ def extract_message_text(payload: dict[str, Any]) -> str:
     return "\n".join(text_parts).strip()
 
 
-def is_message_recent_enough(message: dict[str, Any], cutoff_date: date | datetime | None = None) -> bool:
-    if cutoff_date is None:
-        return True
+def is_message_in_date_range(
+    message: dict[str, Any],
+    date_from: date | datetime | None = None,
+    date_to: date | datetime | None = None,
+) -> bool:
+    """Check whether a Gmail message falls within an inclusive date range.
 
-    cutoff = cutoff_date.date() if isinstance(cutoff_date, datetime) else cutoff_date
+    Args:
+        message: A Gmail message dictionary returned by the API.
+        date_from: The earliest accepted date. When omitted, there is no lower
+            bound.
+        date_to: The latest accepted date. When omitted, there is no upper bound.
 
+    Returns:
+        True if the message's internal date falls within the inclusive range,
+        otherwise False.
+    """
     internal_date = message.get("internalDate")
     if not internal_date:
         return False
 
-    message_timestamp = datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc).date()
-    return message_timestamp >= cutoff
+    message_date = datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc).date()
+
+    if date_from is not None:
+        date_from_value = date_from.date() if isinstance(date_from, datetime) else date_from
+        if message_date < date_from_value:
+            return False
+
+    if date_to is not None:
+        date_to_value = date_to.date() if isinstance(date_to, datetime) else date_to
+        if message_date > date_to_value:
+            return False
+
+    return True
 
 
-def get_linkedin_messages(service, limit: int = 10, cutoff_date: date | datetime | None = None) -> list[dict[str, Any]]:
+def get_linkedin_messages(
+    service,
+    limit: int = 10,
+    date_from: date | datetime | None = None,
+    date_to: date | datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch LinkedIn job-alert messages from Gmail within an inclusive date range.
+
+    Args:
+        service: An authenticated Gmail API service object.
+        limit: Maximum number of messages to return after filtering and sorting.
+        date_from: Earliest date to include. Messages before this date are
+            excluded.
+        date_to: Latest date to include. Messages after this date are excluded.
+
+    Returns:
+        A list of Gmail message dictionaries for LinkedIn job alerts, sorted from
+        newest to oldest and limited to ``limit`` entries.
+    """
     sender_filter = " OR ".join(f"from:({address})" for address in LINKEDIN_EMAIL_ADDRESSES)
     query = f"({sender_filter})"
     response = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
@@ -84,8 +143,10 @@ def get_linkedin_messages(service, limit: int = 10, cutoff_date: date | datetime
     messages: list[dict[str, Any]] = []
 
     for message_ref in message_refs:
+        # Fetch each message in full so we can evaluate the message date and
+        # apply the explicit date-range filter before returning results.
         message = service.users().messages().get(userId="me", id=message_ref["id"], format="full").execute()
-        if is_message_recent_enough(message, cutoff_date):
+        if is_message_in_date_range(message, date_from=date_from, date_to=date_to):
             messages.append(message)
 
     messages.sort(key=lambda item: int(item.get("internalDate", "0")), reverse=True)
@@ -93,17 +154,45 @@ def get_linkedin_messages(service, limit: int = 10, cutoff_date: date | datetime
 
 
 def extract_email_lines(content: str) -> list[str]:
+    """Return the non-empty lines from an email body with surrounding whitespace removed.
+
+    Args:
+        content: Raw email text as a single string.
+
+    Returns:
+        A list of stripped, non-blank lines in their original order.
+    """
     normalized_content = content or ""
     return [line.strip() for line in normalized_content.splitlines() if line.strip()]
 
 
 def parse_email_content(content: str) -> list[dict[str, str]]:
+    """Parse a LinkedIn job alert into one or more structured job records.
+
+    Args:
+        content: The full text of a LinkedIn alert email, including subject and
+            body content.
+
+    Returns:
+        A list of job dictionaries with keys such as title, company, location,
+        salary, url, and extra information. Empty lists are returned when no job
+        records can be parsed.
+    """
     lines = extract_email_lines(content)
 
     if not lines:
         return []
 
     def is_generic_text(value: str) -> bool:
+        """Return True when a line is LinkedIn boilerplate rather than a job entry.
+
+        Args:
+            value: Candidate text from a parsed email line.
+
+        Returns:
+            True if the text matches common LinkedIn alert footer or navigation
+            copy, otherwise False.
+        """
         lowered = value.lower()
         generic_phrases = {
             "new jobs match your preferences.",
@@ -125,71 +214,20 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
         )
 
     def parse_simple_content(source_lines: list[str]) -> list[dict[str, str]]:
+        """Parse a small email body without separator markers.
+
+        Args:
+            source_lines: A list of cleaned email lines to interpret as a job.
+
+        Returns:
+            A list containing one or more parsed job dictionaries when a simple
+            pattern is detected; otherwise an empty list.
+        """
         subject_line = next((line.split(":", 1)[1].strip() for line in source_lines if line.lower().startswith("subject:")), "")
         source_text = "\n".join(source_lines)
 
-        title = ""
-        company = ""
-        location = ""
-        salary = ""
-        url = ""
-
-        for line in source_lines:
-            match = re.match(r"(?i)\b(?:role|title|position|job)\s*[:\-]\s*(.+)", line)
-            if match:
-                title = match.group(1).strip(" .:-")
-                break
-
-        if not title:
-            match = re.search(r"(?i)\b(?:subject|headline)\s*[:\-]\s*(.+)", source_text)
-            if match:
-                title = match.group(1).strip(" .:-")
-
-        if not title and subject_line:
-            title = subject_line.strip(" .:-")
-
-        if not company and subject_line:
-            if " at " in subject_line:
-                parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" at ", 1)]
-                if not title:
-                    title = parsed_title
-                company = parsed_company
-            elif " - " in subject_line:
-                parsed_title, parsed_company = [segment.strip() for segment in subject_line.split(" - ", 1)]
-                if not title:
-                    title = parsed_title
-                company = parsed_company
-
-        for line in source_lines:
-            location_match = re.match(r"(?i)location\s*[:\-]\s*(.+)", line)
-            if location_match:
-                location = location_match.group(1).strip()
-                break
-
-        for line in source_lines:
-            salary_match = re.match(r"(?i)(?:salary|compensation|pay)\s*[:\-]\s*(.+)", line)
-            if salary_match:
-                salary = salary_match.group(1).strip()
-                break
-
-        url_match = re.search(r"https?://[^\s)\]>]+", source_text)
-        if url_match:
-            url = url_match.group(0)
-
-        if title or company or location or url:
-            return [
-                {
-                    "title": title,
-                    "company": company,
-                    "location": location,
-                    "salary": salary,
-                    "url": url,
-                    "extra information": "",
-                }
-            ]
-
-        return []
-
+    # LinkedIn job alerts usually prepend a generic intro and append a footer,
+    # so trim those sections to isolate the actual job listings.
     start_index = None
     end_index = None
 
@@ -276,11 +314,30 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
 
 
 def make_job_id(job: dict[str, str]) -> str:
+    """Create a short stable identifier for a job record.
+
+    Args:
+        job: A job dictionary, typically containing title, company, location, and
+            optional URL data.
+
+    Returns:
+        A 12-character SHA-1 hash derived from the job URL or descriptive fields.
+    """
     seed = job.get("url") or f"{job.get('title','')}|{job.get('company','')}|{job.get('location','')}"
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
 
 
 def merge_jobs(existing_jobs: list[dict[str, Any]], incoming_jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge existing and newly parsed jobs without duplicating records.
+
+    Args:
+        existing_jobs: Jobs already saved to disk.
+        incoming_jobs: Newly parsed jobs from the latest email batch.
+
+    Returns:
+        A deduplicated list of jobs, preserving the first-seen copy for each
+        unique job ID.
+    """
     merged: dict[str, dict[str, Any]] = {}
 
     for job in existing_jobs:
@@ -298,6 +355,15 @@ def merge_jobs(existing_jobs: list[dict[str, Any]], incoming_jobs: list[dict[str
 
 
 def load_jobs(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """Load saved jobs from a JSON file.
+
+    Args:
+        path: Path to the JSON file containing the stored jobs.
+
+    Returns:
+        A list of job dictionaries loaded from disk. Returns an empty list if the
+        file does not exist or does not contain a list payload.
+    """
     file_path = Path(path)
     if not file_path.exists():
         return []
@@ -312,6 +378,12 @@ def load_jobs(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
 
 
 def persist_jobs(path: str | os.PathLike[str], jobs: list[dict[str, Any]]) -> None:
+    """Save a list of job records to a JSON file.
+
+    Args:
+        path: Destination path for the JSON output.
+        jobs: Job dictionaries to write to disk.
+    """
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -325,9 +397,28 @@ def export_recent_email_lines(
     limit: int = 5,
     days: int = 3,
 ) -> list[dict[str, Any]]:
-    cutoff_date = date.today() - timedelta(days=days)
+    """Export recent LinkedIn email content to a JSON snapshot for inspection.
+
+    Args:
+        output_path: Where to write the exported email samples.
+        limit: Maximum number of messages to include in the export.
+        days: Number of recent days to scan when selecting messages.
+
+    Returns:
+        A list of exported message dictionaries containing the message ID, subject,
+        timestamp, and extracted email lines.
+    """
+    date_from = date.today() - timedelta(days=days)
+    date_to = date.today()
     service = get_gmail_service()
-    messages = get_linkedin_messages(service, limit=max(limit * 4, 20), cutoff_date=cutoff_date)
+    # Fetch more messages than the final sample count so filters can remove
+    # stale or non-LinkedIn items without dropping too many valid results.
+    messages = get_linkedin_messages(
+        service,
+        limit=max(limit * 4, 20),
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     samples: list[dict[str, Any]] = []
     for message in messages[:limit]:
@@ -358,10 +449,22 @@ def export_recent_email_lines(
 def run_workflow(
     output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json",
     limit: int = 10,
-    cutoff_date: date | datetime | None = None,
+    date_from: date | datetime | None = None,
+    date_to: date | datetime | None = None,
 ) -> list[dict[str, Any]]:
+    """Fetch LinkedIn job alerts, parse job records, and save the consolidated output.
+
+    Args:
+        output_path: File path where the merged job list should be stored.
+        limit: Maximum number of Gmail messages to inspect for this run.
+        date_from: Earliest date to include in the lookup. Inclusive.
+        date_to: Latest date to include in the lookup. Inclusive.
+
+    Returns:
+        A merged list of job dictionaries saved to the output file.
+    """
     service = get_gmail_service()
-    messages = get_linkedin_messages(service, limit=limit, cutoff_date=cutoff_date)
+    messages = get_linkedin_messages(service, limit=limit, date_from=date_from, date_to=date_to)
     parsed_jobs: list[dict[str, Any]] = []
 
     for message in messages:
@@ -382,14 +485,22 @@ def run_workflow(
                 parsed_jobs.append(parsed)
 
     existing_jobs = load_jobs(output_path)
+    # Merge on a stable job ID so repeated runs keep the canonical record without
+    # accumulating duplicate entries from the same alert.
     merged_jobs = merge_jobs(existing_jobs, parsed_jobs)
     persist_jobs(output_path, merged_jobs)
     return merged_jobs
 
 
 def main() -> None:
-    cutoff_date = date.today()
-    jobs = run_workflow(cutoff_date=cutoff_date)
+    """Run the daily LinkedIn job workflow for the current date.
+
+    Returns:
+        None. The function processes the latest jobs and writes them to the default
+        jobs.json file.
+    """
+    today = date.today()
+    jobs = run_workflow(date_from=today, date_to=today)
     print(f"Processed {len(jobs)} jobs and saved them to {BASE_DIR / 'jobs.json'}")
 
 

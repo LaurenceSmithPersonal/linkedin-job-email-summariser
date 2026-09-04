@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from datetime import date
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +15,18 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 JOBS_PATH = main.BASE_DIR / "jobs.json"
 HOST = "127.0.0.1"
 PORT = 8000
+
+
+def parse_update_date(value: object) -> date | None:
+    """Parse an optional ISO date supplied by the update API."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("dates must use YYYY-MM-DD format")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("dates must use YYYY-MM-DD format") from error
 
 
 def deduplicate_jobs(jobs: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -117,11 +130,22 @@ class JobRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
+            payload = self._read_json() or {}
+            date_from = parse_update_date(payload.get("date_from"))
+            date_to = parse_update_date(payload.get("date_to"))
+            if date_from and date_to and date_from > date_to:
+                raise ValueError("from date cannot be after to date")
             before_ids = {job["id"] for job in read_jobs()}
-            jobs = main.run_workflow(output_path=JOBS_PATH)
+            jobs = main.run_workflow(
+                output_path=JOBS_PATH,
+                date_from=date_from,
+                date_to=date_to,
+            )
             jobs = deduplicate_jobs(jobs)
             new_count = sum(job["id"] not in before_ids for job in jobs)
             self._send_json({"jobs": jobs, "new_count": new_count})
+        except ValueError as error:
+            self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
         except Exception as error:
             self._send_json(
                 {"error": f"Job update failed: {error}"},

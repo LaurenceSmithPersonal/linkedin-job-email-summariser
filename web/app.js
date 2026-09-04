@@ -8,6 +8,8 @@ const listElement = document.querySelector("#job-list");
 const statusElement = document.querySelector("#status-message");
 const filterElement = document.querySelector("#job-filter");
 const updateButton = document.querySelector("#update-button");
+const dateFromElement = document.querySelector("#date-from");
+const dateToElement = document.querySelector("#date-to");
 
 function isReviewed(job) {
   return job.reviewed === "yes";
@@ -33,6 +35,26 @@ function sortJobs(jobs) {
     const secondDate = Date.parse(second.email_datetime || "") || 0;
     return secondDate - firstDate;
   });
+}
+
+function dateInputValue(value) {
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match && !Number.isNaN(Date.parse(`${match[1]}T00:00:00Z`))) {
+    return match[1];
+  }
+  return "";
+}
+
+function setDefaultDateInputs() {
+  const dates = state.jobs
+    .map((job) => dateInputValue(job.email_datetime))
+    .filter(Boolean)
+    .sort();
+  dateFromElement.value = dates[dates.length - 1] || "";
+  const today = new Date();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  dateToElement.value = `${today.getFullYear()}-${month}-${day}`;
 }
 
 function visibleJobs() {
@@ -122,7 +144,7 @@ function formatDate(value) {
   if (!value) return "Date not provided";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Date not provided";
-  return `Received ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(parsed)}`;
+  return `Received ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(parsed)}`;
 }
 
 function renderJobs() {
@@ -163,6 +185,7 @@ async function loadJobs() {
     if (!response.ok) throw new Error("Could not load jobs.");
     const payload = await response.json();
     state.jobs = deduplicateJobs(payload.jobs || []);
+    setDefaultDateInputs();
     renderJobs();
     setStatus("");
   } catch (error) {
@@ -207,7 +230,14 @@ updateButton.addEventListener("click", async () => {
   updateButton.innerHTML = "<span aria-hidden=\"true\">&#8987;</span> Updating...";
   setStatus("Updating jobs. This may take a moment...");
   try {
-    const response = await fetch("/api/update", { method: "POST" });
+    const response = await fetch("/api/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date_from: dateFromElement.value,
+        date_to: dateToElement.value,
+      }),
+    });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Job update failed.");
     state.jobs = deduplicateJobs(payload.jobs || []);

@@ -12,6 +12,15 @@ import web_server
 class WebServerTests(unittest.TestCase):
     """Verify job API data operations without starting a network server."""
 
+    def test_parse_update_date_accepts_iso_dates_and_rejects_invalid_values(self):
+        """Convert API date values to dates and reject malformed input."""
+        self.assertEqual(
+            web_server.parse_update_date("2026-09-04").isoformat(),
+            "2026-09-04",
+        )
+        with self.assertRaises(ValueError):
+            web_server.parse_update_date("04/09/2026")
+
     def test_deduplicate_jobs_keeps_first_record(self):
         """Keep one record per ID and preserve the first duplicate."""
         jobs = [

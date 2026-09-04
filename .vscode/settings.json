@@ -5,6 +5,11 @@
             "matchCommandLine": true
         },
         "./.venv/bin/python": true,
-        ".": true
+        ".": true,
+        "uv": true,
+        "/^node --check web/app\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

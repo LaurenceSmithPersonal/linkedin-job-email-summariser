@@ -63,6 +63,27 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
                 self.assertTrue(parsed_job.get("location"))
                 self.assertTrue(parsed_job.get("url"))
 
+    def test_parse_email_content_ignores_subject_metadata_before_job_block(self):
+        """Do not turn a reminder email subject into a job record."""
+        content = "\n".join(
+            [
+                "Subject: New jobs similar to Senior Lead - Reporting, Analytics and AI at RES",
+                "Jobs similar to Senior Lead - Reporting, Analytics and AI at RES",
+                "View job: https://www.linkedin.com/comm/jobs/view/4461543492",
+                "---------------------------------------------------------",
+                "Senior Lead - Reporting, Analytics and AI",
+                "RES",
+                "Cambridge",
+                "View job: https://www.linkedin.com/comm/jobs/view/4462414313",
+            ]
+        )
+
+        parsed_jobs = main.parse_email_content(content)
+
+        self.assertEqual(len(parsed_jobs), 1)
+        self.assertEqual(parsed_jobs[0]["title"], "Senior Lead - Reporting, Analytics and AI")
+        self.assertEqual(parsed_jobs[0]["company"], "RES")
+
     def test_merge_jobs_appends_only_new_entries(self):
         """Ensure merge_jobs only adds new IDs while preserving existing records.
 
@@ -81,7 +102,7 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in merged], ["job-1", "job-2"])
 
     def test_merge_jobs_sets_reviewed_flag_for_new_jobs_only(self):
-        """New jobs should default to reviewed=no without altering existing values."""
+        """New jobs should default to not reviewed without altering existing values."""
         existing = [{"id": "job-1", "title": "Existing Role", "reviewed": "yes"}]
         incoming = [{"id": "job-2", "title": "New Role"}]
 
@@ -89,7 +110,7 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
 
         by_id = {job["id"]: job for job in merged}
         self.assertEqual(by_id["job-1"]["reviewed"], "yes")
-        self.assertEqual(by_id["job-2"]["reviewed"], "no")
+        self.assertEqual(by_id["job-2"]["reviewed"], "not reviewed")
 
     def test_merge_jobs_keeps_existing_job_text_unchanged(self):
         """Existing entries should be left alone; only brand-new jobs receive review defaults."""
@@ -100,7 +121,7 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
 
         by_id = {job["id"]: job for job in merged}
         self.assertNotIn("reviewed", by_id["job-1"])
-        self.assertEqual(by_id["job-2"]["reviewed"], "no")
+        self.assertEqual(by_id["job-2"]["reviewed"], "not reviewed")
 
     def test_persist_jobs_writes_json_file(self):
         """Write job records to disk as JSON and preserve their content.

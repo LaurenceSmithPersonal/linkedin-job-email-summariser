@@ -41,12 +41,12 @@ class WebServerTests(unittest.TestCase):
             jobs_path.write_text(json.dumps([original_job]), encoding="utf-8")
 
             with patch.object(web_server, "JOBS_PATH", jobs_path):
-                updated_job = web_server.update_review_status("job-1", "yes")
+                updated_job = web_server.update_review_status("job-1", "want to apply")
 
             saved_jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(updated_job["reviewed"], "yes")
-        self.assertEqual(saved_jobs, [{"id": "job-1", "title": "Role", "reviewed": "yes"}])
+        self.assertEqual(updated_job["reviewed"], "want to apply")
+        self.assertEqual(saved_jobs, [{"id": "job-1", "title": "Role", "reviewed": "want to apply"}])
 
     def test_update_review_status_returns_none_for_unknown_id(self):
         """Report a missing job without writing a new record."""

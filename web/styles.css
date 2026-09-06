@@ -82,6 +82,7 @@ select { padding: 9px 32px 9px 10px; border: 1px solid var(--line); color: var(-
 .job-link { color: var(--accent-dark); font-size: 13px; font-weight: 700; }
 .review-control { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 13px; font-weight: 700; cursor: pointer; }
 .review-control input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.status-select { min-width: 145px; padding: 7px 28px 7px 9px; font-size: 13px; font-weight: 700; }
 
 .loading-state, .empty-state, .error-state { padding: 70px 20px; border: 1px dashed var(--line); color: var(--muted); text-align: center; }
 .empty-title { margin: 0 0 8px; color: var(--ink); font-size: 26px; }

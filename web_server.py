@@ -66,12 +66,12 @@ def write_jobs(jobs: list[dict[str, object]]) -> None:
             Path(temporary_path).unlink(missing_ok=True)
 
 
-def update_review_status(job_id: str, reviewed: str) -> dict[str, object] | None:
+def update_review_status(job_id: str, status: str) -> dict[str, object] | None:
     """Set one job's review status and return the updated record."""
     jobs = read_jobs()
     for job in jobs:
         if job["id"] == job_id:
-            job["reviewed"] = reviewed
+            job["reviewed"] = status
             write_jobs(jobs)
             return job
     return None
@@ -109,16 +109,18 @@ class JobRequestHandler(BaseHTTPRequestHandler):
             return
 
         payload = self._read_json()
-        reviewed = payload.get("reviewed") if payload else None
-        if reviewed not in {"yes", "no"}:
+        status = payload.get("reviewed") if payload else None
+        if status in {"yes", "no"}:
+            status = "reviewed" if status == "yes" else "not reviewed"
+        if status not in main.JOB_STATUSES:
             self._send_json(
-                {"error": "reviewed must be 'yes' or 'no'"},
+                {"error": f"reviewed must be one of: {', '.join(main.JOB_STATUSES)}"},
                 HTTPStatus.BAD_REQUEST,
             )
             return
 
         job_id = unquote(request_path.removeprefix("/api/jobs/"))
-        job = update_review_status(job_id, reviewed)
+        job = update_review_status(job_id, status)
         if job is None:
             self._send_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
             return

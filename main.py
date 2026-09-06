@@ -25,6 +25,15 @@ LINKEDIN_EMAIL_ADDRESSES = [
     "jobalerts-noreply@linkedin.com",
 ]
 
+JOB_STATUSES = [
+    "not reviewed",
+    "reviewed",
+    "want to apply",
+    "applied",
+    "rejected",
+    "success",
+]
+
 
 def get_gmail_service():
     """Create an authenticated Gmail API client for the current user.
@@ -252,6 +261,10 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
         end_index = len(lines)
 
     relevant_lines = [line.strip() for line in lines[start_index:end_index] if line.strip()]
+    relevant_lines = [
+        line for line in relevant_lines
+        if not line.lower().startswith(("subject:", "from:", "to:"))
+    ]
 
     if not any(line.startswith("-----") for line in relevant_lines):
         return parse_simple_content(relevant_lines or lines)
@@ -356,7 +369,7 @@ def merge_jobs(existing_jobs: list[dict[str, Any]], incoming_jobs: list[dict[str
     for job in incoming_jobs:
         job_copy = dict(job)
         job_copy.setdefault("id", make_job_id(job_copy))
-        job_copy.setdefault("reviewed", "no")
+        job_copy.setdefault("reviewed", "not reviewed")
         if job_copy["id"] not in merged:
             merged[job_copy["id"]] = job_copy
 

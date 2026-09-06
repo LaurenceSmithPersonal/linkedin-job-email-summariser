@@ -11,8 +11,38 @@ const updateButton = document.querySelector("#update-button");
 const dateFromElement = document.querySelector("#date-from");
 const dateToElement = document.querySelector("#date-to");
 
+const jobStatuses = [
+  "not reviewed",
+  "reviewed",
+  "want to apply",
+  "applied",
+  "rejected",
+  "success",
+];
+
+function jobStatus(job) {
+  if (job.reviewed === "yes") return "reviewed";
+  if (job.reviewed === "no" || !job.reviewed) return "not reviewed";
+  return job.reviewed;
+}
+
 function isReviewed(job) {
-  return job.reviewed === "yes";
+  return jobStatus(job) !== "not reviewed";
+}
+
+function populateFilterOptions() {
+  filterElement.replaceChildren();
+  const allJobsOption = document.createElement("option");
+  allJobsOption.value = "all";
+  allJobsOption.textContent = "All jobs";
+  filterElement.append(allJobsOption);
+
+  jobStatuses.forEach((status) => {
+    const option = document.createElement("option");
+    option.value = status;
+    option.textContent = status;
+    filterElement.append(option);
+  });
 }
 
 function displayValue(value, fallback = "Not provided") {
@@ -58,9 +88,9 @@ function setDefaultDateInputs() {
 }
 
 function visibleJobs() {
-  const jobs = state.filter === "unreviewed"
-    ? state.jobs.filter((job) => !isReviewed(job))
-    : state.jobs;
+  const jobs = state.filter === "all"
+    ? state.jobs
+    : state.jobs.filter((job) => jobStatus(job) === state.filter);
   return sortJobs(jobs);
 }
 
@@ -90,15 +120,20 @@ function createReviewControl(job) {
   wrapper.className = "review-control";
   wrapper.addEventListener("click", (event) => event.stopPropagation());
 
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = isReviewed(job);
-  checkbox.disabled = state.pendingIds.has(job.id);
-  checkbox.setAttribute("aria-label", `Mark ${displayValue(job.title, "job")} as reviewed`);
-  checkbox.addEventListener("change", () => saveReviewStatus(job, checkbox.checked ? "yes" : "no"));
+  const select = document.createElement("select");
+  select.className = "status-select";
+  select.disabled = state.pendingIds.has(job.id);
+  select.setAttribute("aria-label", `Set status for ${displayValue(job.title, "job")}`);
+  jobStatuses.forEach((status) => {
+    const option = document.createElement("option");
+    option.value = status;
+    option.textContent = status;
+    option.selected = status === jobStatus(job);
+    select.append(option);
+  });
+  select.addEventListener("change", () => saveReviewStatus(job, select.value));
 
-  const text = createTextElement("span", "review-text", checkbox.checked ? "Reviewed" : "Not reviewed");
-  wrapper.append(checkbox, text);
+  wrapper.append(select);
   return wrapper;
 }
 
@@ -156,11 +191,12 @@ function renderJobs() {
   if (!jobs.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
+    const isUnreviewedFilter = state.filter === "not reviewed";
     empty.append(
-      createTextElement("h2", "empty-title", state.filter === "unreviewed" ? "All caught up." : "No jobs yet."),
-      createTextElement("p", "empty-copy", state.filter === "unreviewed" ? "Every saved job has been reviewed." : "Run an update to bring in your latest LinkedIn alerts."),
+      createTextElement("h2", "empty-title", isUnreviewedFilter ? "All caught up." : "No jobs yet."),
+      createTextElement("p", "empty-copy", isUnreviewedFilter ? "Every saved job has been reviewed." : "No jobs match this status."),
     );
-    if (state.filter === "unreviewed") {
+    if (state.filter !== "all") {
       const showAll = document.createElement("button");
       showAll.className = "button button-secondary";
       showAll.type = "button";
@@ -219,6 +255,8 @@ async function saveReviewStatus(job, reviewed) {
     renderJobs();
   }
 }
+
+populateFilterOptions();
 
 filterElement.addEventListener("change", () => {
   state.filter = filterElement.value;

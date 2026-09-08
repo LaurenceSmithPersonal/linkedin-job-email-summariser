@@ -84,6 +84,18 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertEqual(parsed_jobs[0]["title"], "Senior Lead - Reporting, Analytics and AI")
         self.assertEqual(parsed_jobs[0]["company"], "RES")
 
+    def test_parse_email_content_ignores_jobs_similar_metadata_from_downloaded_email(self):
+        """Parse genuine jobs after the leading reminder metadata line."""
+        fixture_path = Path(__file__).resolve().parent / "inputs" / "risk_finance_leader_reminder_2026-09-07.json"
+        with fixture_path.open("r", encoding="utf-8") as handle:
+            sample = json.load(handle)
+
+        parsed_jobs = main.parse_email_content("\n".join(sample["lines"]))
+
+        self.assertEqual(parsed_jobs[0]["title"], "Head of Credit Risk")
+        self.assertEqual(parsed_jobs[0]["company"], "Abound")
+        self.assertNotIn("Jobs similar to", parsed_jobs[0]["title"])
+
     def test_merge_jobs_appends_only_new_entries(self):
         """Ensure merge_jobs only adds new IDs while preserving existing records.
 

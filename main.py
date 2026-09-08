@@ -263,7 +263,7 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
     relevant_lines = [line.strip() for line in lines[start_index:end_index] if line.strip()]
     relevant_lines = [
         line for line in relevant_lines
-        if not line.lower().startswith(("subject:", "from:", "to:"))
+        if not line.lower().startswith(("subject:", "from:", "to:", "jobs similar to"))
     ]
 
     if not any(line.startswith("-----") for line in relevant_lines):

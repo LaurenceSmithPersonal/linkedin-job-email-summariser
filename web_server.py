@@ -34,7 +34,7 @@ def deduplicate_jobs(jobs: list[dict[str, object]]) -> list[dict[str, object]]:
     unique_jobs: dict[str, dict[str, object]] = {}
     for job in jobs:
         job_copy = dict(job)
-        job_id = str(job_copy.get("id") or main.make_job_id(job_copy))
+        job_id = main.make_job_id(job_copy)
         job_copy["id"] = job_id
         unique_jobs.setdefault(job_id, job_copy)
     return list(unique_jobs.values())

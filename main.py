@@ -342,9 +342,10 @@ def make_job_id(job: dict[str, str]) -> str:
             optional URL data.
 
     Returns:
-        A 12-character SHA-1 hash derived from the job URL or descriptive fields.
+        A 12-character SHA-1 hash derived from the job title, company, and
+        location.
     """
-    seed = job.get("url") or f"{job.get('title','')}|{job.get('company','')}|{job.get('location','')}"
+    seed = f"{job.get('title', '')}|{job.get('company', '')}|{job.get('location', '')}"
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
 
 
@@ -363,12 +364,12 @@ def merge_jobs(existing_jobs: list[dict[str, Any]], incoming_jobs: list[dict[str
 
     for job in existing_jobs:
         job_copy = dict(job)
-        job_copy.setdefault("id", make_job_id(job_copy))
-        merged[job_copy["id"]] = job_copy
+        job_copy["id"] = make_job_id(job_copy)
+        merged.setdefault(job_copy["id"], job_copy)
 
     for job in incoming_jobs:
         job_copy = dict(job)
-        job_copy.setdefault("id", make_job_id(job_copy))
+        job_copy["id"] = make_job_id(job_copy)
         job_copy.setdefault("reviewed", "not reviewed")
         if job_copy["id"] not in merged:
             merged[job_copy["id"]] = job_copy

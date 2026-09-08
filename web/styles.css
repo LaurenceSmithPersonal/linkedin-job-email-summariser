@@ -66,12 +66,12 @@ select { padding: 9px 32px 9px 10px; border: 1px solid var(--line); color: var(-
 .status-message.success { color: #287348; }
 .status-message.error { color: var(--accent-dark); }
 
-.job-list { display: grid; gap: 10px; margin-top: 10px; }
-.job-card { padding: 17px 22px 15px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); transition: border-color 160ms ease, transform 160ms ease; }
+.job-list { display: grid; width: 100%; max-width: 100%; gap: 10px; margin-top: 10px; }
+.job-card { width: 100%; min-width: 0; padding: 17px 22px 15px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); transition: border-color 160ms ease, transform 160ms ease; }
 .job-card:hover { border-color: var(--accent); transform: translateY(-2px); }
 .job-card.is-reviewed { box-shadow: none; opacity: 0.74; }
 .job-header { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
-.job-title { margin: 0; font-size: 18px; line-height: 1.2; }
+.job-title { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 18px; line-height: 1.2; }
 .job-company { margin: 5px 0 10px; font-weight: 700; }
 .job-metadata { display: flex; flex-wrap: wrap; gap: 8px 26px; color: var(--muted); font-size: 14px; }
 .metadata-item::before { content: '•'; margin-right: 8px; color: var(--yellow); font-weight: 700; }

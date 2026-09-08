@@ -24,29 +24,42 @@ class WebServerTests(unittest.TestCase):
     def test_deduplicate_jobs_keeps_first_record(self):
         """Keep one record per ID and preserve the first duplicate."""
         jobs = [
-            {"id": "job-1", "title": "First"},
-            {"id": "job-1", "title": "Duplicate"},
-            {"id": "job-2", "title": "Second"},
+            {"id": "job-1", "title": "First", "company": "Acme", "location": "London"},
+            {"id": "job-1", "title": "First", "company": "Acme", "location": "London", "url": "different"},
+            {"id": "job-2", "title": "Second", "company": "Acme", "location": "London"},
         ]
 
         result = web_server.deduplicate_jobs(jobs)
 
-        self.assertEqual(result, [jobs[0], jobs[2]])
+        expected = [dict(jobs[0]), dict(jobs[2])]
+        expected[0]["id"] = web_server.main.make_job_id(expected[0])
+        expected[1]["id"] = web_server.main.make_job_id(expected[1])
+        self.assertEqual(result, expected)
 
     def test_update_review_status_persists_only_requested_status(self):
         """Persist a review change while retaining the job's other fields."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             jobs_path = Path(temporary_directory) / "jobs.json"
-            original_job = {"id": "job-1", "title": "Role", "reviewed": "no"}
+            original_job = {
+                "id": "job-1",
+                "title": "Role",
+                "company": "Acme",
+                "location": "London",
+                "reviewed": "no",
+            }
             jobs_path.write_text(json.dumps([original_job]), encoding="utf-8")
 
             with patch.object(web_server, "JOBS_PATH", jobs_path):
-                updated_job = web_server.update_review_status("job-1", "want to apply")
+                job_id = web_server.main.make_job_id(original_job)
+                updated_job = web_server.update_review_status(job_id, "want to apply")
 
             saved_jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
 
         self.assertEqual(updated_job["reviewed"], "want to apply")
-        self.assertEqual(saved_jobs, [{"id": "job-1", "title": "Role", "reviewed": "want to apply"}])
+        expected_job = dict(original_job)
+        expected_job["id"] = web_server.main.make_job_id(original_job)
+        expected_job["reviewed"] = "want to apply"
+        self.assertEqual(saved_jobs, [expected_job])
 
     def test_update_review_status_returns_none_for_unknown_id(self):
         """Report a missing job without writing a new record."""

@@ -183,6 +183,22 @@ def extract_email_lines(content: str) -> list[str]:
     return [line.strip() for line in normalized_content.splitlines() if line.strip()]
 
 
+def is_saved_job_reminder(content: str) -> bool:
+    """Return whether the email body starts with a saved-job reminder line.
+
+    Args:
+        content: Email body content, excluding the subject line.
+
+    Returns:
+        True when the first meaningful line starts with ``Your saved job at``.
+    """
+    lines = extract_email_lines(content)
+    if not lines:
+        return False
+
+    return lines[0].lower().startswith("your saved job at")
+
+
 def parse_email_content(content: str) -> list[dict[str, str]]:
     """Parse a LinkedIn job alert into one or more structured job records.
 
@@ -452,6 +468,8 @@ def export_recent_email_lines(
 
         if "linkedin" not in full_content.lower():
             continue
+        if is_saved_job_reminder(body):
+            continue
 
         samples.append(
             {
@@ -497,6 +515,8 @@ def run_workflow(
         full_content = f"Subject: {subject}\n{body}"
 
         if "linkedin" not in full_content.lower():
+            continue
+        if is_saved_job_reminder(body):
             continue
 
         parsed_jobs_for_message = parse_email_content(full_content)

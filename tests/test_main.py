@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import tempfile
@@ -95,6 +96,34 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
         self.assertEqual(parsed_jobs[0]["title"], "Head of Credit Risk")
         self.assertEqual(parsed_jobs[0]["company"], "Abound")
         self.assertNotIn("Jobs similar to", parsed_jobs[0]["title"])
+
+    def test_run_workflow_excludes_saved_job_reminder_email(self):
+        """Do not add jobs from the supplied saved-job reminder message."""
+        body_text = "Your saved job at Monzo is still available.\nLinkedIn"
+        encoded_body = base64.urlsafe_b64encode(body_text.encode()).decode()
+        message = {
+            "id": "1a0822706bd12c79",
+            "internalDate": "1788889983000",
+            "payload": {
+                "headers": [
+                    {
+                        "name": "Subject",
+                        "value": "LinkedIn job reminder",
+                    }
+                ],
+                "mimeType": "text/plain",
+                "body": {
+                    "data": encoded_body,
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                patch.object(main, "get_gmail_service", return_value="service"), \
+                patch.object(main, "get_linkedin_messages", return_value=[message]):
+            jobs = main.run_workflow(Path(tmpdir) / "jobs.json")
+
+        self.assertEqual(jobs, [])
 
     def test_merge_jobs_appends_only_new_entries(self):
         """Ensure merge_jobs only adds new IDs while preserving existing records.

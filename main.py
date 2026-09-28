@@ -12,11 +12,13 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 BASE_DIR = Path(__file__).resolve().parent
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/gmail.modify"
 ]
 
 
@@ -33,6 +35,111 @@ JOB_STATUSES = [
     "rejected",
     "success",
 ]
+
+# These are common LinkedIn email subjects that indicate the message is not a job alert and will be ignored when parsing job records. The check is case-insensitive and matches any subject that contains one of these phrases.
+SUBJECT_CONTAINS_TO_IGNORE = [
+    "your application was sent to",
+    "your application was viewed by",
+    "has been created",
+]
+
+# Companies that spam LinkedIn / ones don't want to work for
+COMPANIES_TO_IGNORE = [
+    "RES",
+    "Bending Spoons",
+    "SMT GB",
+]
+
+GMAIL_LABELS_TO_REVIEW = ["LinkedIn to review"]
+GMAIL_LABEL_ONCE_REVIEWED = "LinkedIn reviewed"
+
+
+def is_ignored_company(company: str) -> bool:
+    """Return whether a company is configured to be ignored.
+
+    Args:
+        company: Company name from a parsed job record.
+
+    Returns:
+        True when the company matches an ignored company name, case-insensitively.
+    """
+    normalized_company = company.strip().casefold()
+    return any(
+        normalized_company == ignored_company.strip().casefold()
+        for ignored_company in COMPANIES_TO_IGNORE
+    )
+
+
+def get_gmail_label_ids(service, label_names: list[str]) -> dict[str, str]:
+    """Return Gmail label IDs, creating missing user labels when needed.
+
+    Args:
+        service: An authenticated Gmail API service object.
+        label_names: Gmail label names to resolve.
+
+    Returns:
+        A mapping from each requested label name to its Gmail label ID.
+
+    Missing labels are created as visible user labels so the workflow can be used
+    without a separate Gmail setup step.
+    """
+    def list_labels() -> dict[str, str]:
+        response = service.users().labels().list(userId="me").execute()
+        return {
+            label.get("name", "").casefold(): label.get("id")
+            for label in response.get("labels") or []
+        }
+
+    available_labels = list_labels()
+    resolved_labels: dict[str, str] = {}
+
+    for name in label_names:
+        normalized_name = name.casefold()
+        label_id = available_labels.get(normalized_name)
+        if not label_id:
+            try:
+                created_label = service.users().labels().create(
+                    userId="me",
+                    body={
+                        "name": name,
+                        "labelListVisibility": "labelShow",
+                        "messageListVisibility": "show",
+                    },
+                ).execute()
+                label_id = created_label["id"]
+            except HttpError as error:
+                if getattr(error.resp, "status", None) != 409:
+                    raise
+                label_id = list_labels().get(normalized_name)
+                if not label_id:
+                    raise
+        resolved_labels[name] = label_id
+
+    return resolved_labels
+
+
+def mark_message_reviewed(
+    service,
+    message_id: str,
+    review_label_ids: list[str],
+    reviewed_label_id: str,
+) -> None:
+    """Replace the review label on a successfully processed Gmail message.
+
+    Args:
+        service: An authenticated Gmail API service object.
+        message_id: Gmail message ID to update.
+        review_label_ids: IDs of the labels being removed.
+        reviewed_label_id: ID of the label being added.
+    """
+    service.users().messages().modify(
+        userId="me",
+        id=message_id,
+        body={
+            "removeLabelIds": review_label_ids,
+            "addLabelIds": [reviewed_label_id],
+        },
+    ).execute()
 
 
 def get_gmail_service():
@@ -90,7 +197,7 @@ def extract_message_text(payload: dict[str, Any]) -> str:
             decoded = base64.urlsafe_b64decode(body_data.encode("ascii")).decode("utf-8", errors="ignore")
             return decoded
 
-    for part in payload.get("parts", []):
+    for part in payload.get("parts") or []:
         part_text = extract_message_text(part)
         if part_text:
             text_parts.append(part_text)
@@ -154,9 +261,12 @@ def get_linkedin_messages(
         newest to oldest and limited to ``limit`` entries.
     """
     sender_filter = " OR ".join(f"from:({address})" for address in LINKEDIN_EMAIL_ADDRESSES)
-    query = f"({sender_filter})"
+    label_filter = " OR ".join(
+        f'label:"{label}"' for label in GMAIL_LABELS_TO_REVIEW
+    )
+    query = f"({sender_filter}) ({label_filter})"
     response = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
-    message_refs = response.get("messages", [])
+    message_refs = response.get("messages") or []
     messages: list[dict[str, Any]] = []
 
     for message_ref in message_refs:
@@ -265,8 +375,20 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
     end_index = None
 
     for index, line in enumerate(lines):
-        if line.lower() == "new jobs match your preferences.":
+        if line.lower() in {
+            "new jobs match your preferences.",
+            "a new job matches your preferences.",
+        }:
             start_index = index + 1
+        elif line.lower().startswith(
+            "there were no results for your alert, but these similar jobs"
+        ):
+            start_index = index + 1
+            if (
+                start_index < len(lines)
+                and "/jobs/alerts/" in lines[start_index].lower()
+            ):
+                start_index += 1
         elif line.lower().startswith("see all jobs on linkedin"):
             end_index = index
             break
@@ -505,6 +627,8 @@ def run_workflow(
         A merged list of job dictionaries saved to the output file.
     """
     service = get_gmail_service()
+    label_names = [*GMAIL_LABELS_TO_REVIEW, GMAIL_LABEL_ONCE_REVIEWED]
+    label_ids = get_gmail_label_ids(service, label_names)
     messages = get_linkedin_messages(service, limit=limit, date_from=date_from, date_to=date_to)
     parsed_jobs: list[dict[str, Any]] = []
 
@@ -514,18 +638,34 @@ def run_workflow(
         body = extract_message_text(message.get("payload", {}))
         full_content = f"Subject: {subject}\n{body}"
 
-        if "linkedin" not in full_content.lower():
-            continue
-        if is_saved_job_reminder(body):
-            continue
+        should_parse = (
+            "linkedin" in full_content.lower()
+            and not is_saved_job_reminder(body)
+            and not any(
+                phrase in subject.lower()
+                for phrase in SUBJECT_CONTAINS_TO_IGNORE
+            )
+        )
+        if not should_parse:
+            parsed_jobs_for_message = []
+        else:
+            parsed_jobs_for_message = parse_email_content(full_content)
 
-        parsed_jobs_for_message = parse_email_content(full_content)
         for parsed in parsed_jobs_for_message:
+            if is_ignored_company(parsed.get("company", "")):
+                continue
             if parsed.get("title") or parsed.get("url"):
                 parsed.setdefault("id", make_job_id(parsed))
                 parsed.setdefault("source_message_id", message.get("id"))
                 parsed.setdefault("email_datetime", datetime.fromtimestamp(int(message.get("internalDate", "0")) / 1000, tz=timezone.utc).isoformat())
                 parsed_jobs.append(parsed)
+
+        mark_message_reviewed(
+            service,
+            message["id"],
+            [label_ids[name] for name in GMAIL_LABELS_TO_REVIEW],
+            label_ids[GMAIL_LABEL_ONCE_REVIEWED],
+        )
 
     existing_jobs = load_jobs(output_path)
     # Merge on a stable job ID so repeated runs keep the canonical record without

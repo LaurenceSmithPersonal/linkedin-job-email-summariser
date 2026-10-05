@@ -24,6 +24,51 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
 
         self.assertEqual(main.extract_email_lines(content), ["Subject: Developer at Acme", "Role: Senior Engineer"])
 
+    def test_extract_email_lines_removes_job_alert_boilerplate(self):
+        """Remove alert headings and result-count lines from the email text."""
+        content = "\n".join(
+            [
+                "Your job alert for Senior Credit Risk Manager in Cambridge",
+                "5 new jobs match your preferences.",
+                "Senior Manager, Strategy and Analytics",
+                "Capital One",
+            ]
+        )
+
+        self.assertEqual(
+            main.extract_email_lines(content),
+            ["Senior Manager, Strategy and Analytics", "Capital One"],
+        )
+
+    def test_parse_email_content_ignores_job_alert_boilerplate_lines(self):
+        """Keep alert headings and result counts from becoming job fields."""
+        content = "\n".join(
+            [
+                "Subject: LinkedIn job alert",
+                "Your job alert for Senior Credit Risk Manager, Cambridge UK",
+                "5 new jobs match your preferences.",
+                "Senior Manager, Strategy and Analytics",
+                "Capital One",
+                "London",
+                "View job: https://www.linkedin.com/comm/jobs/view/4475017197",
+                "---------------------------------------------------------",
+                "Credit Strategy Principal",
+                "Wayflyer",
+                "London",
+                "View job: https://www.linkedin.com/comm/jobs/view/4446816810",
+                "See all jobs on LinkedIn",
+            ]
+        )
+
+        parsed_jobs = main.parse_email_content(content)
+
+        self.assertEqual(
+            [job["title"] for job in parsed_jobs],
+            ["Senior Manager, Strategy and Analytics", "Credit Strategy Principal"],
+        )
+        self.assertEqual(parsed_jobs[0]["company"], "Capital One")
+        self.assertEqual(parsed_jobs[0]["location"], "London")
+
     def test_parse_email_content_extracts_multiple_jobs_from_fixture(self):
         """Parse a real sample email fixture into multiple job records.
 

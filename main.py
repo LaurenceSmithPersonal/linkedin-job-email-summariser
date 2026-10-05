@@ -281,16 +281,26 @@ def get_linkedin_messages(
 
 
 def extract_email_lines(content: str) -> list[str]:
-    """Return the non-empty lines from an email body with surrounding whitespace removed.
+    """Return meaningful email lines with surrounding whitespace removed.
 
     Args:
         content: Raw email text as a single string.
 
     Returns:
-        A list of stripped, non-blank lines in their original order.
+        A list of stripped, non-blank lines in their original order, excluding
+        LinkedIn job-alert heading and result-count lines.
     """
     normalized_content = content or ""
-    return [line.strip() for line in normalized_content.splitlines() if line.strip()]
+    boilerplate_phrases = ("your job alert for", "new jobs match")
+    return [
+        stripped_line
+        for line in normalized_content.splitlines()
+        if (stripped_line := line.strip())
+        and not any(
+            phrase in stripped_line.casefold()
+            for phrase in boilerplate_phrases
+        )
+    ]
 
 
 def is_saved_job_reminder(content: str) -> bool:

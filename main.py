@@ -52,6 +52,26 @@ COMPANIES_TO_IGNORE = [
 
 GMAIL_LABELS_TO_REVIEW = ["LinkedIn to review"]
 GMAIL_LABEL_ONCE_REVIEWED = "LinkedIn reviewed"
+EMAIL_BOILERPLATE_PHRASES = (
+    "your job alert for",
+    "new jobs match",
+    "new job matches",
+    "there were no results for your alert",
+    "expand your search",
+    "recommendations based on your activity",
+    "learn why",
+    "you are receiving job alert emails",
+    "manage your job alerts",
+    "unsubscribe",
+    "this company is actively hiring",
+    "apply with resume & profile",
+    "/jobs/alerts/",
+)
+EMAIL_FOOTER_START_PHRASES = (
+    "see all jobs",
+    "view all jobs",
+    "this email was intended for",
+)
 
 
 def is_ignored_company(company: str) -> bool:
@@ -288,19 +308,29 @@ def extract_email_lines(content: str) -> list[str]:
 
     Returns:
         A list of stripped, non-blank lines in their original order, excluding
-        LinkedIn job-alert heading and result-count lines.
+        LinkedIn job-alert boilerplate lines.
     """
     normalized_content = content or ""
-    boilerplate_phrases = ("your job alert for", "new jobs match")
-    return [
-        stripped_line
-        for line in normalized_content.splitlines()
-        if (stripped_line := line.strip())
-        and not any(
-            phrase in stripped_line.casefold()
-            for phrase in boilerplate_phrases
-        )
-    ]
+    email_lines: list[str] = []
+
+    for line in normalized_content.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+
+        lowered_line = stripped_line.casefold()
+        if any(
+            phrase in lowered_line
+            for phrase in EMAIL_FOOTER_START_PHRASES
+        ):
+            break
+        if any(
+            phrase in lowered_line for phrase in EMAIL_BOILERPLATE_PHRASES
+        ):
+            continue
+        email_lines.append(stripped_line)
+
+    return email_lines
 
 
 def is_saved_job_reminder(content: str) -> bool:
@@ -336,36 +366,6 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
     if not lines:
         return []
 
-    def is_generic_text(value: str) -> bool:
-        """Return True when a line is LinkedIn boilerplate rather than a job entry.
-
-        Args:
-            value: Candidate text from a parsed email line.
-
-        Returns:
-            True if the text matches common LinkedIn alert footer or navigation
-            copy, otherwise False.
-        """
-        lowered = value.lower()
-        generic_phrases = {
-            "new jobs match your preferences.",
-            "expand your search",
-            "recommendations based on your activity.",
-            "this email was intended for",
-            "learn why we included this",
-            "you are receiving job alert emails.",
-            "manage your job alerts",
-            "unsubscribe:",
-            "view all jobs:",
-            "this company is actively hiring",
-            "apply with resume & profile",
-            "see all jobs on linkedin",
-            "your job alert for",
-        }
-        return lowered in generic_phrases or any(
-            phrase in lowered for phrase in ("learn why", "manage your job alerts", "unsubscribe", "view all jobs", "this email was intended")
-        )
-
     def parse_simple_content(source_lines: list[str]) -> list[dict[str, str]]:
         """Parse a small email body without separator markers.
 
@@ -379,36 +379,7 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
         subject_line = next((line.split(":", 1)[1].strip() for line in source_lines if line.lower().startswith("subject:")), "")
         source_text = "\n".join(source_lines)
 
-    # LinkedIn job alerts usually prepend a generic intro and append a footer,
-    # so trim those sections to isolate the actual job listings.
-    start_index = None
-    end_index = None
-
-    for index, line in enumerate(lines):
-        if line.lower() in {
-            "new jobs match your preferences.",
-            "a new job matches your preferences.",
-        }:
-            start_index = index + 1
-        elif line.lower().startswith(
-            "there were no results for your alert, but these similar jobs"
-        ):
-            start_index = index + 1
-            if (
-                start_index < len(lines)
-                and "/jobs/alerts/" in lines[start_index].lower()
-            ):
-                start_index += 1
-        elif line.lower().startswith("see all jobs on linkedin"):
-            end_index = index
-            break
-
-    if start_index is None:
-        start_index = 0
-    if end_index is None:
-        end_index = len(lines)
-
-    relevant_lines = [line.strip() for line in lines[start_index:end_index] if line.strip()]
+    relevant_lines = [line.strip() for line in lines if line.strip()]
     relevant_lines = [
         line for line in relevant_lines
         if not line.lower().startswith(("subject:", "from:", "to:", "jobs similar to"))
@@ -444,9 +415,6 @@ def parse_email_content(content: str) -> list[dict[str, str]]:
         title = normalized_block[0]
         company = normalized_block[1] if len(normalized_block) > 1 else ""
         location = normalized_block[2] if len(normalized_block) > 2 else ""
-
-        if is_generic_text(title) or is_generic_text(company) or is_generic_text(location):
-            continue
 
         url = ""
         extra_information_parts: list[str] = []

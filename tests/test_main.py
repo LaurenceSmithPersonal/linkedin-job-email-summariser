@@ -32,6 +32,8 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
                 "5 new jobs match your preferences.",
                 "Senior Manager, Strategy and Analytics",
                 "Capital One",
+                "See all jobs on LinkedIn",
+                "Footer navigation text",
             ]
         )
 
@@ -105,6 +107,10 @@ class LinkedInEmailWorkflowTests(unittest.TestCase):
             self.assertTrue(parsed_jobs, f"Expected at least one parsed job for {sample['subject']}")
             for parsed_job in parsed_jobs:
                 self.assertTrue(parsed_job.get("title"))
+                self.assertFalse(
+                    parsed_job["title"].startswith("Experienced in Climate"),
+                    "Email footer profile headline was parsed as a job title",
+                )
                 self.assertTrue(parsed_job.get("company"))
                 self.assertTrue(parsed_job.get("location"))
                 self.assertTrue(parsed_job.get("url"))

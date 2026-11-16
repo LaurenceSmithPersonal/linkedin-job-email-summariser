@@ -18,6 +18,7 @@ const jobStatuses = [
   "applied",
   "rejected",
   "success",
+  "closed before applying"
 ];
 
 function jobStatus(job) {

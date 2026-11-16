@@ -32,6 +32,7 @@ JOB_STATUSES = [
     "reviewed",
     "want to apply",
     "applied",
+    "closed before applying",
     "rejected",
     "success",
 ]
@@ -48,6 +49,7 @@ COMPANIES_TO_IGNORE = [
     "RES",
     "Bending Spoons",
     "SMT GB",
+    "Mott MacDonald"
 ]
 
 GMAIL_LABELS_TO_REVIEW = ["LinkedIn to review"]
@@ -589,7 +591,7 @@ def export_recent_email_lines(
 
 def run_workflow(
     output_path: str | os.PathLike[str] = BASE_DIR / "jobs.json",
-    limit: int = 10,
+    limit: int = 20,
     date_from: date | datetime | None = None,
     date_to: date | datetime | None = None,
 ) -> list[dict[str, Any]]:
